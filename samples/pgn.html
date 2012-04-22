@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <title></title>
+    </head>
+    <body>
+        <button onclick="tokenize()">Parse</button>
+        <textarea id="pgn" rows="10", cols="100">[Event "F/S Return Match"]
+[Site "Belgrade, Serbia Yugoslavia|JUG"]
+[Date "1992.11.04"]
+[Round "29"]
+[White "Fischer, Robert J."]
+[Black "Spassky, Boris V."]
+[Result "1/2-1/2"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 {This opening is called the Ruy Lopez.} 3... a6
+4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 9. h3 Nb8  10. d4 Nbd7
+11. c4 c6 12. cxb5 axb5 13. Nc3 Bb7 14. Bg5 b4 15. Nb1 h6 16. Bh4 c5 17. dxe5
+Nxe4 18. Bxe7 Qxe7 19. exd6 Qf6 20. Nbd2 Nxd6 21. Nc4 Nxc4 22. Bxc4 Nb6
+23. Ne5 Rae8 24. Bxf7+ Rxf7 25. Nxf7 Rxe1+ 26. Qxe1 Kxf7 27. Qe3 Qg5 28. Qxg5
+hxg5 29. b3 Ke6 30. a3 Kd6 31. axb4 cxb4 32. Ra5 Nd5 33. f3 Bc8 34. Kf2 Bf5
+35. Ra7 g6 36. Ra6+ Kc5 37. Ke1 Nf4 38. g3 Nxh3 39. Kd2 Kb5 40. Rd6 Kc5 41. Ra6
+Nf2 42. g4 Bd3 43. Re6 1/2-1/2</textarea>
+        <script src="../src/Tokenizer.js"></script>
+        <script>
+            var tokenizer = new Tokenizer({
+                exclude: ["space", "comment"],
+                tokens: {
+                    space: /\s+/,
+                    tag: {
+                        pattern: /\[([^\]]+)\s+"([^"]+)"\]/,
+                        attributes: {
+                            key: 1, value: 2
+                        }
+                    },
+                    san: {
+                        pattern: /([BKNPQR])?(([a-h])?([1-8])?)(x)?([a-h])([1-8])(\s*[eE]\.?[pP]\.?\s*)?(=([BNQR]))?([\+#])?(!|!!|\?|\?\?|!\?|\?!)?/,
+                        attributes: {
+                            piece: 1,
+                            fromFile: 3,
+                            fromRank: {
+                                group: 4,
+                                type: "int"
+                            },
+                            toFile: 6,
+                            toRank: {
+                                group: 7,
+                                type: "int"
+                            },
+                            capture: {
+                                group: 5,
+                                type: "boolean"
+                            },
+                            enpassant: {
+                                group: 8,
+                                type: "boolean"
+                            },
+                            promotion: {
+                                group: 9,
+                                type: "boolean"
+                            },
+                            promotedToPiece: 10,
+                            checkmate: 11,
+                            annotation: 12
+                        }
+                    },
+                    castling: /O-O(-O)?/,
+                    result: /1-0|0-1|1\/2-1\/2|\*/,
+                    move: {
+                        pattern: /([1-9][0-9]*)\.(\.\.)?/,
+                        attributes: {
+                            number: {
+                                group: 1,
+                                type: "int"
+                            }
+                        }
+                    },
+                    comment_inline: {
+                        pattern: /\{([^\}]*)\}/,
+                        name: "comment",
+                        attributes: {
+                            text: 1
+                        }
+                    },
+                    comment_endofline: {
+                        pattern: /;([^\n]*)\n/,
+                        name: "comment",
+                        attributes: {
+                            text: 1
+                        }
+                    }
+                }
+            });
+            function tokenize() {
+                tokenizer.text(document.getElementById("pgn").value);
+                tokenizer.each(function(token){
+                    console.log(JSON.stringify(token));
+                });
+            }
+        </script>
+    </body>
+</html>
