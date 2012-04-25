@@ -1,24 +1,23 @@
 (function(global){
 
-function createCallback(callback) {
-    var scope, func, args = [null];
+function createCallback(callback, args) {
+    var scope, func;
+    if (!args) args = [];
     switch (typeof(callback)) {
         case "function":
             scope = null;
             func = callback;
-            break;
+            return {
+                scope: scope,
+                func: func,
+                args: args
+            };
         case "object":
-            scope = callback.scope ? callback.scope : null;
-            if (callback.args) args = args.concat(callback.args);
-            break;
-        default:
-            throw "Invalid callback";
+            if (!callback.scope) callback.scope = null;
+            callback.args = callback.args ? args.concat(callback.args) : callback.args;
+            return callback;
     }
-    return {
-        scope: scope,
-        func: func,
-        args: args
-    };
+    throw "Invalid callback";
 };
 
 function isUnd(a) {
@@ -44,51 +43,65 @@ var Tokenizer;
         var name,
             tokenDefs = config.tokens ? config.tokens : config,
             flags = "g",
-            tokenDef,
+            tokenType, tokenDef,
             pattern,
             tokenTypes = this.tokenTypes = {},
             regexp = "",
             group = 0, groupCount,
-            attributes, attributeName, attribute
-        ;
-        for (name in tokenDefs) {
-            tokenDef = tokenDefs[name];
-            pattern = (tokenDef.constructor === RegExp ? tokenDef : tokenDef.pattern).source;
-            if (regexp.length) regexp += "|";
-            regexp += "(" + pattern + ")";
-            pattern = pattern.replace(/\\\\/g, "").replace(/\\\(/g, "");
-            groupCount = pattern.length - pattern.replace(/\(/g, "").length;
-            tokenTypes[name] = {
-                name: tokenDef.name ? tokenDef.name : name,
-                tokenDef: tokenDef,
-                group: ++group,
-                groupCount: groupCount
-            };
-            group += groupCount;
-            if (attributes = tokenDef.attributes) {
-                for (attributeName in attributes) {
-                    attribute = attributes[attributeName];
-                    switch (typeof(attribute)) {
-                        case "number":
-                            attributes[attributeName] = {
-                                group: parseInt(attribute, 10)
-                            };
-                            break;
-                        case "function":
-                            attributes[attributeName] = {
-                                callback: createCallback(attribute)
-                            };
-                            break;
-                        case "object":
-                            break;
+            attributes, attributeName, attribute,
+            callback,
+            defaultToken,
+            initToken = function(name) {
+                tokenDef = tokenDefs[name];
+                pattern = (tokenDef.constructor === RegExp ? tokenDef : tokenDef.pattern).source;
+                if (pattern === ".") defaultToken = name;
+                if (regexp.length) regexp += "|";
+                regexp += "(" + pattern + ")";
+                pattern = pattern.replace(/\\\\/g, "").replace(/\\\(/g, "");
+                groupCount = pattern.length - pattern.replace(/\(/g, "").length;
+                tokenType = {
+                    name: tokenDef.name ? tokenDef.name : name,
+                    tokenDef: tokenDef,
+                    group: ++group,
+                    groupCount: groupCount
+                };
+                group += groupCount;
+
+                if (attributes = tokenDef.attributes) {
+                    for (attributeName in attributes) {
+                        attribute = attributes[attributeName];
+                        switch (typeof(attribute)) {
+                            case "number":
+                                attributes[attributeName] = {
+                                    group: parseInt(attribute, 10)
+                                };
+                                break;
+                            case "function":
+                                attributes[attributeName] = {
+                                    callback: createCallback(attribute, [null])
+                                };
+                                break;
+                            case "object":
+                                break;
+                        }
                     }
                 }
+                else tokenDef.attributes = {
+                    text: {
+                        group: 0
+                    }
+                };
+
+                if (callback = tokenDef.callback) tokenType.callback = createCallback(callback, [null, null]);
+                tokenTypes[name] = tokenType;
             }
-            else tokenDef.attributes = {
-                text: {
-                    group: 0
-                }
+        ;
+        for (name in tokenDefs) initToken(name);
+        if (!defaultToken) {
+            tokenDefs = {
+                default: /.+/
             };
+            initToken("default");
         }
         if (config.ignoreCase) flags += "i";
         this.regexp = new RegExp(regexp, flags);
@@ -104,7 +117,7 @@ var Tokenizer;
      */
     text: function(text, from, to){
         this._text = text;
-        this.regexp.lastIndex = from ? from : 0;
+        this.regexp.lastIndex = this._next = from ? from : 0;
         this.to = to ? to : text.length;
     },
     /**
@@ -123,12 +136,15 @@ var Tokenizer;
     one: function() {
         var match = this.regexp.exec(this._text);
         if (!match) return;
-        var text = match[0], name, tokenType, tokenTypeName, group, tokenDef,
+        var text = match[0],
+            at = match.index,
+            name, tokenType, tokenTypeName, group, tokenDef,
             exclude = this._exclude,
             attributes, attribute, attributeValue,
             tokenTypes = this.tokenTypes, token,
             callback, args
         ;
+        this._next = at + text.length;
         for (name in tokenTypes) {
             tokenType = tokenTypes[name];
             group = tokenType.group;
@@ -138,8 +154,9 @@ var Tokenizer;
             if (exclude && exclude[tokenTypeName]) return this.one();
             token = {
                 type: tokenTypeName,
-                at: match.index
+                at: at
             };
+
             attributes = tokenDef.attributes;
             for (name in attributes) {
                 attribute = attributes[name];
@@ -152,6 +169,9 @@ var Tokenizer;
                     attributeValue = callback.func.apply(callback.scope, args);
                 }
                 switch (attribute.type) {
+                    case "number":
+                        attributeValue = Number(attributeValue);
+                        break;
                     case "int":
                         attributeValue = parseInt(attributeValue, 10);
                         break;
@@ -167,6 +187,13 @@ var Tokenizer;
                 }
                 token[name] = attributeValue;
             }
+
+            if (callback = tokenType.callback) {
+                args = callback.args;
+                args[0] = token;
+                args[1] = match.slice(group, group + tokenType.groupCount + 1);
+                callback.func.apply(callback.scope, args);
+            }
             break;
         }
         return token;
@@ -178,14 +205,16 @@ var Tokenizer;
      * @return boolean
      */
     each: function(callback) {
-        callback = createCallback(callback);
+        callback = createCallback(callback, [null]);
         var func = callback.func,
             args = callback.args,
-            scope = callback.scope
+            scope = callback.scope,
+            token
         ;
         while (this.more()) {
-            args[0] = this.one();
-            if (func.apply(scope, args) === false) return false;
+            if (args[0] = this.one()) {
+                if (func.apply(scope, args) === false) return false;
+            }
         }
         return true;
     },
